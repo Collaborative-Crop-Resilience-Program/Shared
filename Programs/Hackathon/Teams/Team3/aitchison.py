@@ -67,22 +67,9 @@ df_stick_subtracted = df_stick_subtracted.loc[:,~df_stick_subtracted.columns.str
 pca = PCA(n_components=2)
 coords = pca.fit_transform(df_stick_subtracted.T)
 results_matrix = pd.DataFrame(data=coords,index=df_stick_subtracted.columns,columns=['dim0','dim1'])
+
+plt.plot(results_matrix.loc[df_stick_subtracted.columns.str.contains('_1'),'dim0'],results_matrix.loc[df_stick_subtracted.columns.str.contains('_1'),'dim1'],'.')
+plt.plot(results_matrix.loc[df_stick_subtracted.columns.str.contains('_2'),'dim0'],results_matrix.loc[df_stick_subtracted.columns.str.contains('_2'),'dim1'],'.')
+plt.plot(results_matrix.loc[df_stick_subtracted.columns.str.contains('_3'),'dim0'],results_matrix.loc[df_stick_subtracted.columns.str.contains('_3'),'dim1'],'.')
 # %%
-accession_names = [n.split('_')[0] for n in results_matrix.index]
-accession_names = pd.unique(accession_names)
-results_per_rep = pd.DataFrame(index=accession_names,columns=['score_1','score_2','score_3'])
-results_per_rep.loc[:,'score_1'] = results_matrix.loc[results_matrix.index.str.contains('_1'),'dim0'].values
-results_per_rep.loc[:,'score_2'] = results_matrix.loc[results_matrix.index.str.contains('_2'),'dim0'].values
-results_per_rep.loc[:,'score_3'] = results_matrix.loc[results_matrix.index.str.contains('_3'),'dim0'].values
-
-results_per_rep.to_csv('pca_0.csv')
-
-accession_names = [n.split('_')[0] for n in results_matrix.index]
-accession_names = pd.unique(accession_names)
-results_per_rep = pd.DataFrame(index=accession_names,columns=['score_1','score_2','score_3'])
-results_per_rep.loc[:,'score_1'] = results_matrix.loc[results_matrix.index.str.contains('_1'),'dim1'].values
-results_per_rep.loc[:,'score_2'] = results_matrix.loc[results_matrix.index.str.contains('_2'),'dim1'].values
-results_per_rep.loc[:,'score_3'] = results_matrix.loc[results_matrix.index.str.contains('_3'),'dim1'].values
-
-results_per_rep.to_csv('pca_1.csv')
 # %%
