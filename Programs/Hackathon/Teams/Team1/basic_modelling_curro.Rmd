@@ -1,0 +1,458 @@
+---
+title: "Hackaton"
+output: html_document
+author: "Curro Campuzano"
+date: "2023-04-28"
+---
+
+This notebook explores some data analysis possibilities. 
+
+
+```{r}
+isolates <- "../../../isolatesXPlantGeno.csv"
+phenotypes <- "../../../PhenotypicMeasurements.csv"
+snps <- "../../../lotus_snps.csv"
+```
+
+
+## Reading phenotypes and isolates
+
+```{r}
+set.seed(1)
+library(tidyverse)
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+```
+
+
+Here, we are normalizing with the stick control: it doesn't affect the results. 
+
+```{r}
+isolates <- read_csv(isolates) |>
+  column_to_rownames("...1")|>
+  t() |> as.data.frame()
+
+isolates_agg <- rownames(isolates) |>
+  str_remove("_\\d+")
+
+isolates$Sample <- isolates_agg
+
+
+isolates <- isolates |>
+  group_by(Sample) |>
+  summarise_all(mean)
+
+stick_control <- isolates[which(isolates$Sample == "Stick_NI"), -c(1, ncol(isolates))] |>
+  as.numeric()
+stick_control <- stick_control + 1
+
+isolates[,-c(1, ncol(isolates))] <- isolates[,-c(1, ncol(isolates))] / stick_control 
+ 
+```
+
+
+```{r}
+
+phenotypes <- read_csv(phenotypes)|>
+  select(-Batch)
+
+
+phenotypes <- phenotypes |>
+  colMeans(na.rm = TRUE) |>
+  as.data.frame() |>
+  rownames_to_column("Sample")
+colnames(phenotypes) <- c("Sample", "Y")
+
+```
+
+
+Quick inspect of the data:
+
+```{r}
+isolates |> colnames() |> head()
+```
+
+```{r}
+phenotypes |> glimpse()
+
+```
+
+```{r}
+data <- phenotypes|>
+  inner_join(isolates) |>
+  distinct()|>
+  drop_na()
+```
+
+## Data visualization
+
+We are going to use t-SNE for visualizing the data: 
+
+```{r}
+library(Rtsne)
+
+run_tsne <- function(data){
+  data |>
+  select(-any_of(c("Sample", "Y"))) |>
+  as.matrix()|>
+  Rtsne(
+    check_duplicates=FALSE, pca=TRUE,
+    perplexity=10, theta=0.5, dims=2)
+}
+
+tsne_isolates <- run_tsne(data)
+
+
+plot_tsne <- function(tsne){
+  tsne |>
+    pluck("Y")|>
+    as.data.frame() |>
+    mutate(Y = binned_Y <- cut(data$Y, 3)) |>
+    ggplot(aes(V1, V2, color = Y))+
+    geom_point()+
+    theme_minimal()+
+    xlab("T-SNE-1")+
+    ylab("T-SNE-2")
+}
+
+plot_tsne(tsne_isolates)
+```
+
+It looks like there's some structure, but not related with the phenotype. 
+
+## Data preprocessing
+
+Now, we are preparing the data for modelling: 
+
+We are going to remove near-zero variance features:
+
+```{r}
+library(caret)
+nvz_data <- nzv(data,saveMetrics = TRUE)
+exclude_vars <- nvz_data |>
+  filter(nzv) |>
+  rownames()
+data <- data |>
+  select(-any_of(exclude_vars))
+```
+
+We are centering and scaling all features (actually, saving that for later)
+
+```{r}
+samples <- data$Sample
+Y <- data$Y
+X <- select(data , -Sample, -Y)
+X<- X|>
+  preProcess(method = c("center", "scale")) |>
+  predict(X)
+data <- bind_cols(Y = Y, X)
+rownames(data) <- samples
+```
+
+
+Let's visualize the plot again:
+
+```{r}
+data |>
+  run_tsne() |>
+  plot_tsne()
+```
+
+
+## Modelling
+
+We are going to try different methods. We will split data into training and validating. 
+
+```{r}
+set.seed(1)
+library(rsample)
+split <- data |>
+  initial_split()
+split
+```
+
+For all methods we will tune the model using CV over the training split. 
+
+```{r}
+trctrl <- trainControl(method = "cv", number = 5)
+```
+
+Finally, we define the X matrix: 
+
+## Elastic-net regression
+
+```{r}
+lasso<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'glmnet'
+)
+lasso
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_lasso <- lasso |>
+  predict(newdata = testing(split))
+```
+
+```{r}
+plot_predict <- function(predictions, method){
+ rmse <- RMSE(predictions, testing(split) |> pull(Y))
+  testing(split) |>
+  mutate(
+    obs = Y, pred = predictions,
+  )|>
+  rownames_to_column("x")|>
+  pivot_longer(cols = c(obs, pred))|>
+  ggplot(aes(x = x, color = name, y = value))+
+  geom_point()+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle(paste0(method, " RMSE: ", round(rmse,digits = 4)))
+}
+
+plot_predict(predictions_lasso, "Elastic-Net")
+```
+
+## KNN regression
+
+```{r}
+knn<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'knn'
+)
+knn
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_knn <- knn |>
+  predict(newdata = testing(split))
+
+plot_predict(predictions_knn, "KNN")
+
+```
+
+
+## Random Forest
+
+```{r}
+rf<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'rf'
+)
+rf
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_rf <- rf |>
+  predict(newdata = testing(split))
+
+plot_predict(predictions_rf, "Random Forest")
+
+```
+
+
+## Random
+
+```{r}
+xboost<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'xgbTree'
+)
+xboost
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_xboost <- xboost |>
+  predict(newdata = testing(split))
+
+plot_predict(predictions_xboost, "Boosted Trees")
+
+```
+
+## Integrating SNPs information
+
+First, we are going to preprocess the file so we can easily use it with a specific R library: 
+
+```{r}
+
+snps_data <- read_csv("../../../lotus_snps.csv")
+
+
+groups <- snps_data |> 
+  colnames()|> tail(ncol(snps_data)-2)
+
+tempfile <- "prepro_lotus_snps.csv"
+if (!file.exists(tempfile)) {
+  snps_data |>
+  select(-CHR, -POS)|>
+  write.table(tempfile, sep=",",  col.names=FALSE, row.names=FALSE)
+}
+rm(list = "snps_data")
+```
+
+We need to do some data cleaning before using the SNPs data.
+
+
+```{r}
+prepro_groups <- paste0(
+  "MG", groups |>str_remove("MG")|> str_remove("^0+")
+       )
+prepro_groups[[1]] <- "Gifu"
+```
+
+Now, we read the SNPs data using
+
+
+```{r}
+library(smartsnp)
+
+pcaR <- smart_pca(snp_data = tempfile, sample_group = prepro_groups)
+
+```
+
+
+Let's visualize the PCA (check that we are sub-setting)
+
+```{r}
+data <- pcaR$pca.sample_coordinates |>
+  left_join(
+    data|>
+      rownames_to_column("Group")
+  ) |>
+  select(-Class)|>
+  column_to_rownames("Group")
+  
+data |>
+  ggplot(aes(x = PC1, y=PC2, color =Y))+
+  geom_point()+
+  theme_minimal()
+```
+
+## Rerunning model using PCA
+
+We are centering and scaling all features:
+
+```{r}
+samples <- rownames(data)
+Y <- data$Y
+X <- select(data, -Y)
+X<- X|>
+  preProcess(method = c("center", "scale")) |>
+  predict(X)
+data <- bind_cols(Y = Y, X)
+rownames(data) <- samples
+```
+
+## Modelling
+
+We are going to try different methods. We will split data into training and validating. 
+
+```{r}
+set.seed(1)
+library(rsample)
+split <- data |>
+  initial_split()
+split
+```
+
+Finally, we define the X matrix: 
+
+## Elastic-net regression
+
+```{r}
+lasso<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'glmnet'
+)
+lasso
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_lasso <- lasso |>
+  predict(newdata = testing(split))
+```
+
+```{r}
+plot_predict(predictions_lasso, "Elastic-Net")
+```
+
+## KNN regression
+
+```{r}
+knn<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'knn'
+)
+knn
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_knn <- knn |>
+  predict(newdata = testing(split))
+
+plot_predict(predictions_knn, "KNN")
+
+```
+
+
+## Random Forest
+
+```{r}
+rf<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'rf'
+)
+rf
+```
+
+Now, we predict with our validating set:
+
+```{r}
+predictions_rf <- rf |>
+  predict(newdata = testing(split))
+
+plot_predict(predictions_rf, "Random Forest")
+
+```
+
+
+## Boosted Trees
+
+```{r}
+xboost<-train(
+  Y~.,data = training(split),
+  trControl=trctrl,
+  method = 'xgbTree'
+)
+xboost
+```
+
+```{r}
+predictions_xboost <- xboost |>
+  predict(newdata = testing(split))
+
+plot_predict(predictions_xboost, "Boosted Trees")
+
+```
+
+
