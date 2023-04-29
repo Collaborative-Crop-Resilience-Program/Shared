@@ -113,7 +113,7 @@ shoot_weights = shoot_weights[list(accession_names)]
 # %%
 from sklearn.ensemble import RandomForestRegressor
 model = RandomForestRegressor()
-X = comp_df.T
+X = df_stick_subtracted.T
 y = shoot_weights.values.T.reshape(-1)
 model.fit(X,y)
 print(model.score(X,y))
