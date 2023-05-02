@@ -1,39 +1,39 @@
-#%%
+#%% Load Modules
 import pandas as pd
 import numpy as np
 from pgmpy.estimators import MmhcEstimator
 from pgmpy.estimators import HillClimbSearch, BicScore
+from skbio.stats.composition import clr
 
-#%%
-f1 = pd.read_csv('/Users/bkamos/Desktop/DesktopFolders/InRootHackathon/STID12/isolatesXPlantGeno_trunc.csv', index_col = False)
-# %%
+#%% Load File
+f1 = pd.read_csv('/Users/bkamos/Desktop/DesktopFolders/InRootHackathon/STID12/isolatesXPlantGeno_trunc_noSC.csv', index_col = False)
+isolates = f1['Isolate']
+f1.set_index('Isolate')
+# %% drop rows with low variance (microbial samples) and then transpose the data
 row_vars = f1.var(axis=1)
 row_med = row_vars.describe()
-rows_to_drop = f1[row_vars<=row_med[6]].index
+rows_to_drop = f1[row_vars<row_med[6]].index
 f1.drop(rows_to_drop, axis=0, inplace=True)
 f1transposed = f1.T
-# %%
 
-# colNames = []
-# split_cols = f1.columns
-# split_cols.to_list
-# for i in split_cols:
-#     split = i.split('_')
-#     if len(split) == 1:
-#         colNames.append(split)
-#     if len(split) == 2:
-#         colNames.append(split[0])
-#     else:
-#         colNames.append(split[:2])
+#%%
+# row_vars = batch1Cols.var(axis=1)
+# row_med = row_vars.describe()
+# rows_to_drop = f1[row_vars<row_med[5]].index
+# batch1Cols.drop(rows_to_drop, axis=0, inplace=True)
+# batch1Cols = batch1Cols.T
+f1transposed = f1transposed.iloc[1:,:]
+f1transposed += 1e-6
+f1transposed = f1transposed.astype(float)
 
-# colNames.pop(0)
-# %%
-# f1.columns = colNames
-# %%
-f1transposed1 = f1transposed.iloc[1:,:]
-
-est = HillClimbSearch(f1transposed1)
-best_model = est.estimate(scoring_method=BicScore(f1transposed1))
+# f1transposed1 = (f1transposed1-f1transposed1.min())/(f1transposed1.max()-f1transposed1.min())
+#%%
+dataIndex = f1transposed.index
+dataColummns = f1transposed.columns
+data = clr(f1transposed)
+data = pd.DataFrame(data, columns = dataColummns, index= dataIndex)
+est = HillClimbSearch(data)
+best_model = est.estimate()
 
 # est = MmhcEstimator(f1transposed1)
 # model = est.estimate()
